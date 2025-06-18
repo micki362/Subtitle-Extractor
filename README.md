@@ -1,7 +1,7 @@
 Bulk Subtitle Extractor
 =======================
 
-This application was developed to solve a common problem for users of self-hosted media servers like Plex and Jellyfin: the need to transcode video files when displaying image-based subtitles (PGS, VOBSUB). By extracting these subtitles into a text-based format like SRT, media servers can direct stream the video, saving significant CPU resources.
+I semi-vibecoded this application to solve a common problem for users of self-hosted media servers like Plex and Jellyfin: the need to transcode video files when displaying image-based subtitles (PGS, VOBSUB). By extracting these subtitles into a text-based format like SRT, media servers can direct stream the video, saving significant CPU resources.
 
 Bulk Subtitle Extractor is a user-friendly, cross-platform desktop application that automates this process. Powered by FFmpeg and your favorite OCR tool, it simplifies getting subtitles out of your media collection.
 
@@ -69,7 +69,6 @@ Installation & Setup
         python sub_extractor.py
     
     
-    Use code [with caution](https://support.google.com/legal/answer/13505487).Bash
     
     On its first run, the application will automatically create a configuration file (sub\_extractor\_settings.ini) and a logs directory in the same folder.
     
