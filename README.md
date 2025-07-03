@@ -61,18 +61,18 @@ Prerequisites
 Installation & Setup
 --------------------
 
-*   **Download**: Place the sub\_extractor.py file in a dedicated folder.
+*   **Download**: Place the application files in a dedicated folder.
     
 *   **Run for the First Time**: Execute the script from your terminal:
     
   
-        python sub_extractor.py
+        python src/main.py
     
     
     
     On its first run, the application will automatically create a configuration file (sub\_extractor\_settings.ini) and a logs directory in the same folder.
     
-*   **Configuration (**:
+*   **Configuration**:
     
     *   The app will attempt to use ffmpeg and ffprobe from your system PATH by default.
         
@@ -83,7 +83,7 @@ Installation & Setup
 How to Use
 ----------
 
-*   **Launch the App**: Run python sub\_extractor.py.
+*   **Launch the App**: Run `python src/main.py` or run the executable file from the `dist` directory.
     
 *   **Select a Folder**: Click the **Select Folder** button and choose the directory containing your video files. The app will scan the folder and all its subdirectories for media files and display them in the list.
     
@@ -173,6 +173,23 @@ When you select an output format like srt and the app encounters an image-based 
     
 *   Clean up all temporary files.
     
+
+Building from Source
+--------------------
+
+To build the executable from the source code, you will need to have `pyinstaller` installed. You can install it using pip:
+
+```
+pip install -r requirements.txt
+```
+
+Once you have `pyinstaller` installed, you can build the executable by running the following command from the root directory of the project:
+
+```
+pyinstaller --onefile --windowed --icon=NONE src/main.py
+```
+
+This will create a single executable file in the `dist` directory.
 
 Troubleshooting
 ---------------
