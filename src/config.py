@@ -18,17 +18,17 @@ LIGHT_THEME = {
     "bg": "#ECECEC", "fg": "#000000", "list_bg": "#FFFFFF", "list_fg": "#000000",
     "button_bg": "#DDDDDD", "button_fg": "#000000", "accent_bg": "#777777",
     "accent_fg": "#FFFFFF", "log_bg": "#F0F0F0", "log_fg": "#000000",
-    "progress_bg": "#A0A0A0", "progress_trough": "#D0D0D0"
+    "progress_bg": "#0000FF", "progress_trough": "#D0D0D0"
 }
 DARK_THEME = {
     "bg": "#2D2D2D", "fg": "#FFFFFF", "list_bg": "#3C3C3C", "list_fg": "#FFFFFF",
     "button_bg": "#555555", "button_fg": "#FFFFFF", "accent_bg": "#0078D7",
     "accent_fg": "#FFFFFF", "log_bg": "#252525", "log_fg": "#FFFFFF",
-    "progress_bg": "#0078D7", "progress_trough": "#4A4A4A"
+    "progress_bg": "#FF0000", "progress_trough": "#4A4A4A"
 }
 
 # --- Constants for Subtitle Processing ---
-IMAGE_BASED_CODECS = {'hdmv_pgs_subtitle', 'pgssub', 'dvd_subtitle', 'dvdsub'}
+IMAGE_BASED_CODECS = {'hdmv_pgs_subtitle', 'pgssub', 'dvd_subtitle', 'dvdsub', 'pgs'}
 TEXT_BASED_OUTPUT_FORMATS = {'srt', 'ass', 'vtt'}
 
 # --- Witty OCR Messages ---
