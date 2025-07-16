@@ -9,6 +9,7 @@ import shutil
 import datetime
 import tempfile
 import random
+import ctypes
 from config import AppConfig, LIGHT_THEME, DARK_THEME, OCR_PATIENCE_MESSAGES, MOVIE_EXTENSIONS, SUBTITLE_EXTENSIONS, IMAGE_BASED_CODECS, TEXT_BASED_OUTPUT_FORMATS
 from ui import SubtitleExtractorUI
 
@@ -221,30 +222,58 @@ class SubtitleExtractorApp:
             self.log_message(f"Selected star system (folder): {folder_path}", to_console=False); self.scan_folder(folder_path)
 
     def scan_folder(self, folder_path):
-        self.ui.file_listbox.delete(0, tk.END); self.movie_files_paths = []
+        self.ui.file_tree.delete(*self.ui.file_tree.get_children())
+        self.movie_files_paths = []
         self.ui.status_label.config(text=f"Scanning {os.path.basename(folder_path)} sector..."); self.log_message(f"Scanning sector: {folder_path}...", to_console=False)
         self.master.update_idletasks(); found_count = 0
         for root, _, files in os.walk(folder_path):
             for file in files:
                 if file.lower().endswith(MOVIE_EXTENSIONS):
-                    full_path = os.path.join(root, file); self.movie_files_paths.append(full_path)
-                    self.ui.file_listbox.insert(tk.END, os.path.basename(file)); found_count += 1
+                    full_path = os.path.join(root, file)
+                    self.movie_files_paths.append(full_path)
+                    status = "Subtitles Present" if self._check_for_existing_subs(full_path) else "Ready to Extract"
+                    self.ui.file_tree.insert("", tk.END, values=(os.path.basename(file), status), iid=full_path)
+                    found_count += 1
         msg = f"Found {found_count} transmissions (movie files)." if found_count > 0 else "No transmissions detected in this sector."
         self.ui.status_label.config(text=msg); self.log_message(msg, to_console=False)
 
     def remove_selected_files(self):
-        selected_indices = self.ui.file_listbox.curselection()
-        if not selected_indices: messagebox.showinfo("Info", "No targets selected for removal, Commander.", parent=self.master); return
+        selected_items = self.ui.file_tree.selection()
+        if not selected_items: messagebox.showinfo("Info", "No targets selected for removal, Commander.", parent=self.master); return
         removed_count = 0
-        for i in sorted(selected_indices, reverse=True):
-            self.log_message(f"Removing from target list: {os.path.basename(self.movie_files_paths[i])}", to_console=False)
-            self.ui.file_listbox.delete(i); del self.movie_files_paths[i]; removed_count += 1
-        msg = f"{removed_count} target(s) removed from list. {len(self.movie_files_paths)} remaining."
+        for item in selected_items:
+            self.log_message(f"Removing from target list: {self.ui.file_tree.item(item)['values'][0]}", to_console=False)
+            self.ui.file_tree.delete(item)
+            removed_count += 1
+        msg = f"{removed_count} target(s) removed from list. {len(self.ui.file_tree.get_children())} remaining."
         self.ui.status_label.config(text=msg); self.log_message(msg, to_console=False)
 
+    def remove_files_with_subtitles(self):
+        items_to_remove = []
+        for item in self.ui.file_tree.get_children():
+            if self.ui.file_tree.item(item)['values'][1] == "Subtitles Present":
+                items_to_remove.append(item)
+        
+        if not items_to_remove:
+            messagebox.showinfo("Info", "No files with existing subtitles found to remove.", parent=self.master)
+            return
+
+        removed_count = 0
+        for item in items_to_remove:
+            self.log_message(f"Removing file with subtitles: {self.ui.file_tree.item(item)['values'][0]}", to_console=False)
+            self.ui.file_tree.delete(item)
+            removed_count += 1
+        
+        msg = f"{removed_count} file(s) with subtitles removed from the list."
+        self.ui.status_label.config(text=msg)
+        self.log_message(msg, to_console=False)
+
     def start_extraction_thread(self):
-        files_to_process_paths = list(self.movie_files_paths)
-        if not files_to_process_paths: messagebox.showinfo("No Targets", "No targets acquired. Scan a system and select files.", parent=self.master); return
+        files_to_process_paths = [self.ui.file_tree.item(item)['values'][0] for item in self.ui.file_tree.get_children()]
+        
+        if not files_to_process_paths:
+            messagebox.showinfo("No Targets", "No targets acquired. Scan a system and select files.", parent=self.master)
+            return
 
         self._toggle_extraction_controls(is_extracting=True)
         self.log_buffer.clear()
@@ -253,7 +282,15 @@ class SubtitleExtractorApp:
         if self.log_window and self.log_window.winfo_exists() and self.log_text_widget:
             self.log_text_widget.config(state=tk.NORMAL); self.log_text_widget.delete('1.0', tk.END); self.log_text_widget.config(state=tk.DISABLED)
         self.log_message("--- Starting New Extraction Mission ---", to_console=False)
-        thread = threading.Thread(target=self._extract_subtitles_logic, args=(files_to_process_paths,), daemon=True); thread.start()
+        
+        thread = threading.Thread(target=self._extract_subtitles_logic, args=(files_to_process_paths,), daemon=True)
+        thread.start()
+
+        self.master.after(300000, self.show_patience_message)
+
+    def show_patience_message(self):
+        if self.ui.extract_button['text'] == "Cancel Extraction":
+            messagebox.showinfo("Don't Panic!", "The extraction is taking a while. Don't panic, the Force is with you!")
 
     def _cancel_extraction(self):
         self.log_message("--- MISSION ABORT SIGNAL RECEIVED ---", to_console=True)
@@ -265,11 +302,11 @@ class SubtitleExtractorApp:
         if is_extracting:
             self.cancel_requested.clear()
             self.ui.extract_button.config(text="Cancel Extraction", command=self._cancel_extraction)
-            for btn in [self.ui.remove_button, self.ui.select_folder_button, self.ui.select_langs_button, self.ui.ocr_settings_button]:
+            for btn in [self.ui.remove_button, self.ui.select_folder_button, self.ui.select_langs_button, self.ui.ocr_settings_button, self.ui.remove_with_subs_button]:
                 btn.config(state=tk.DISABLED)
         else:
             self.ui.extract_button.config(text="Extract Subtitles", command=self.start_extraction_thread, state=tk.NORMAL)
-            for btn in [self.ui.remove_button, self.ui.select_folder_button, self.ui.select_langs_button, self.ui.ocr_settings_button]:
+            for btn in [self.ui.remove_button, self.ui.select_folder_button, self.ui.select_langs_button, self.ui.ocr_settings_button, self.ui.remove_with_subs_button]:
                 btn.config(state=tk.NORMAL)
 
     def _update_status_safe(self, message):
@@ -305,6 +342,13 @@ class SubtitleExtractorApp:
         self._update_status_safe(summary_message or "Mission accomplished!"); self.ui.progress_var.set(0)
         messagebox.showinfo("Mission Complete", (summary_message or "Extraction run complete, Commander.") + "\n\nCheck Mission Debrief (Log) for details.", parent=self.master)
         self._toggle_extraction_controls(is_extracting=False)
+
+        for item in self.ui.file_tree.get_children():
+            file_path = self.ui.file_tree.item(item, "values")[0]
+            if file_path in self.files_with_success:
+                self.ui.file_tree.set(item, "Status", "Completed")
+            elif file_path in self.files_with_errors or file_path in self.files_timed_out:
+                self.ui.file_tree.set(item, "Status", "Failed")
 
     def _check_for_existing_subs(self, movie_file_path):
         movie_dir = os.path.dirname(movie_file_path)
@@ -347,19 +391,16 @@ class SubtitleExtractorApp:
         temp_ocr_output_srt_path = os.path.join(ocr_session_temp_dir, f"{os.path.splitext(temp_image_sub_basename)[0]}.srt")
         ocr_command_raw = self.settings['ocr_command_template']
         safe_lang_code_for_ocr = lang_code if len(lang_code) == 3 else self.settings.get('ocr_default_lang', 'eng')
-        ocr_command_str = ocr_command_raw.replace("{INPUT_FILE_PATH}", f'"{temp_image_sub_path}"')
-        ocr_command_str = ocr_command_str.replace("{OUTPUT_SRT_PATH}", f'"{temp_ocr_output_srt_path}"')
-        if "{LANG_3_CODE}" in ocr_command_raw: ocr_command_str = ocr_command_str.replace("{LANG_3_CODE}", safe_lang_code_for_ocr)
-        elif "/ocrlanguage:" in ocr_command_str.lower() and "{LANG_3_CODE}" not in ocr_command_raw:
-            self.log_message(f"[OCR WARNING] Obsolete '/ocrlanguage:' detected. Review Holocron (Config). Attempting to proceed without.", to_console=True)
-            ocr_command_str = re.sub(r'/ocrlanguage:[a-zA-Z0-9_]+', '', ocr_command_str, flags=re.IGNORECASE).strip()
-            ocr_command_str = re.sub(r'\s\s+', ' ', ocr_command_str)
+        
+        # Build the command as a list of arguments
+        command_parts = ocr_command_raw.replace("{INPUT_FILE_PATH}", temp_image_sub_path)
+        command_parts = command_parts.replace("{OUTPUT_SRT_PATH}", temp_ocr_output_srt_path)
+        command_parts = command_parts.replace("{LANG_3_CODE}", safe_lang_code_for_ocr)
 
-        self.log_message(f"[OCR CMD] {ocr_command_str}", to_console=True)
+        self.log_message(f"[OCR CMD] {command_parts}", to_console=True)
         ocr_success = False
         try:
-            import shlex
-            ocr_proc = subprocess.run(shlex.split(ocr_command_str), capture_output=True, text=True, encoding='utf-8', timeout=self.settings['ffmpeg_ocr_timeout'], creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0, check=False)
+            ocr_proc = subprocess.run(command_parts, shell=True, capture_output=True, text=True, encoding='utf-8', timeout=self.settings['ffmpeg_ocr_timeout'], creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0, check=False)
             if ocr_proc.stdout and ocr_proc.stdout.strip(): self.log_message(f"[OCR STDOUT]:\n{ocr_proc.stdout.strip()}")
             if ocr_proc.stderr and ocr_proc.stderr.strip(): self.log_message(f"[OCR STDERR]:\n{ocr_proc.stderr.strip()}")
             self.log_message(f"[OCR RETURN CODE]: {ocr_proc.returncode}")
@@ -369,7 +410,7 @@ class SubtitleExtractorApp:
             elif ocr_proc.returncode == 0: self.log_message(f"[OCR FAILED] Droid translation unit (RC 0) but output datapad (SRT) is empty/missing: {temp_ocr_output_srt_path}", to_console=True)
             else: self.log_message(f"[OCR FAILED] Droid translation unit malfunctioned (RC {ocr_proc.returncode}).", to_console=True)
         except subprocess.TimeoutExpired: self.log_message(f"[OCR TIMEOUT] Comlink lost with OCR droid for {temp_image_sub_basename} after {self.settings['ffmpeg_ocr_timeout']}s.", to_console=True)
-        except FileNotFoundError: self.log_message(f"[OCR ERROR] OCR Droid (tool) not found. Check Holocron (Config) for: {shlex.split(ocr_command_str)[0]}", to_console=True)
+        except FileNotFoundError: self.log_message(f"[OCR ERROR] OCR Droid (tool) not found. Check Holocron (Config) for: {command_parts}", to_console=True)
         except Exception as e:
             self.log_message(f"[OCR CRITICAL ERROR] Catastrophic droid failure during OCR: {e}", to_console=True); import traceback; self.log_message(traceback.format_exc(), to_console=True)
         finally:
