@@ -269,7 +269,7 @@ class SubtitleExtractorApp:
         self.log_message(msg, to_console=False)
 
     def start_extraction_thread(self):
-        files_to_process_paths = [self.ui.file_tree.item(item)['values'][0] for item in self.ui.file_tree.get_children()]
+        files_to_process_paths = [item for item in self.ui.file_tree.get_children()]
         
         if not files_to_process_paths:
             messagebox.showinfo("No Targets", "No targets acquired. Scan a system and select files.", parent=self.master)
