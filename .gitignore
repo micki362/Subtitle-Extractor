@@ -6,3 +6,4 @@ GEMINI.md
 requirements.txt
 __pycache__/
 src/sub_extractor_settings.ini
+src/logs/
