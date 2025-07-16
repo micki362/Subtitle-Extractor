@@ -41,9 +41,11 @@ class SubtitleExtractorUI:
         self.list_frame = ttk.Frame(self.main_frame_container)
         self.list_frame.pack(fill=tk.BOTH, expand=True, pady=5)
         self.scrollbar_y = ttk.Scrollbar(self.list_frame, orient=tk.VERTICAL)
-        self.file_listbox = tk.Listbox(self.list_frame, yscrollcommand=self.scrollbar_y.set, exportselection=False, selectmode=tk.EXTENDED)
-        self.file_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        self.scrollbar_y.config(command=self.file_listbox.yview)
+        self.file_tree = ttk.Treeview(self.list_frame, columns=("File Name", "Status"), show="headings", yscrollcommand=self.scrollbar_y.set, selectmode="extended")
+        self.file_tree.heading("File Name", text="File Name")
+        self.file_tree.heading("Status", text="Status")
+        self.file_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.scrollbar_y.config(command=self.file_tree.yview)
         self.scrollbar_y.pack(side=tk.RIGHT, fill=tk.Y)
 
     def _create_options_widgets(self):
@@ -76,6 +78,8 @@ class SubtitleExtractorUI:
         self.skip_checkbox.pack(side=tk.LEFT, padx=(0, 10))
         self.remove_button = ttk.Button(self.action_buttons_frame, text="Remove Selected", command=self.logic.remove_selected_files)
         self.remove_button.pack(side=tk.RIGHT, padx=5)
+        self.remove_with_subs_button = ttk.Button(self.action_buttons_frame, text="Remove with Subtitles", command=self.logic.remove_files_with_subtitles)
+        self.remove_with_subs_button.pack(side=tk.RIGHT, padx=5)
 
     def _create_action_widgets(self):
         self.extract_button_frame = ttk.Frame(self.main_frame_container)
@@ -118,9 +122,9 @@ class SubtitleExtractorUI:
         self.style.configure("Custom.Horizontal.TProgressbar", troughcolor=theme["progress_trough"], background=theme["progress_bg"], bordercolor=theme["bg"], lightcolor=theme["bg"], darkcolor=theme["bg"])
         self.style.configure("TCombobox", selectbackground=theme["list_bg"], fieldbackground=theme["list_bg"], background=theme["button_bg"], foreground=theme["fg"])
         self.style.map('TCombobox', fieldbackground=[('readonly', theme["list_bg"])], selectbackground=[('readonly', theme["accent_bg"])], selectforeground=[('readonly', theme["accent_fg"])])
-        self.style.configure("TCheckbutton", background=theme["bg"], foreground=theme["fg"])
         self.style.map("TCheckbutton", background=[('active', theme["bg"])], indicatorcolor=[('selected', theme["accent_bg"]), ('!selected', theme["button_bg"])], foreground=[('disabled', theme.get("disabled_fg", "#A0A0A0"))])
-        self.file_listbox.configure(bg=theme["list_bg"], fg=theme["list_fg"], selectbackground=theme["accent_bg"], selectforeground=theme["accent_fg"], highlightbackground=theme["bg"], highlightcolor=theme["accent_bg"])
+        self.style.configure("Treeview", background=theme["list_bg"], foreground=theme["list_fg"], fieldbackground=theme["list_bg"])
+        self.style.map("Treeview", background=[('selected', theme["accent_bg"])], foreground=[('selected', theme["accent_fg"])])
         self.folder_label.configure(background=theme["bg"], foreground=theme["fg"]); self.status_label.configure(background=theme["bg"], foreground=theme["fg"])
         self.theme_button.config(text="Join the Light Side" if self.logic.is_dark_mode else "Embrace the Dark Side")
         if self.logic.log_window and self.logic.log_window.winfo_exists():
