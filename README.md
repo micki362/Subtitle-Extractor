@@ -9,13 +9,15 @@ Features
 --------
 
 *   **Bulk Processing**: Select a folder and the app will automatically find all supported video files.
+*   **Faster Processing**: Extracts multiple files at once to get the job done faster.
+*   **Right-Click Context Menu**: Right-click on any file in the list to quickly open its location, copy its path, or remove it.
 *   **Status Display**: Files are listed with a status indicating if they are "Ready to Extract", have "Subtitles Present", or if the extraction has "Completed" or "Failed".
 *   **Multiple Output Formats**:
     *   Extract text-based subtitles (like SRT, ASS) directly into **SRT**, **ASS**, or **VTT** formats.
     *   **Copy** streams directly without re-encoding, preserving the original format (e.g., PGS/SUP, DVD/SUB).
 *   **Image-Based Subtitle OCR**:
     *   Integrates with external command-line OCR tools (like [Subtitle Edit](https://www.google.com/url?sa=E&q=https%3A%2F%2Fwww.nikse.dk%2Fsubtitleedit), [VOBSUB2SRT](https://www.google.com/url?sa=E&q=https%3A%2F%2Fgithub.com%2Fruediger%2FVobSub2SRT), etc.) to convert image-based subtitles (PGS, VOBSUB) into text-based SRT files.
-    *   Features a user-friendly **OCR Settings Dialog** to configure your tool without editing text files.
+    *   Features a user-friendly **OCR Settings Dialog** with presets for popular tools to simplify configuration.
 *   **Intelligent Filtering**:
     *   Filter extractions by one or more languages (e.g., eng, jpn, fre).
     *   Automatically skips files that already have corresponding subtitle files.
@@ -26,6 +28,7 @@ Features
     *   **Cancel** an ongoing extraction job at any time.
     *   A friendly "Don't Panic!" message will appear if an extraction takes longer than five minutes.
     *   Detailed logging for easy troubleshooting.
+    *   **Remembers Window State**: Automatically saves and restores the window size and position.
 *   **Cross-Platform**: Built with Python and Tkinter, it runs on Windows, macOS, and Linux.
 
 Prerequisites
@@ -83,13 +86,14 @@ You need a command-line tool that can convert image subtitles to SRT. A highly r
 
 In the app, click the **OCR Settings...** button.
 
-### 3\. Configure the Dialog
+### 3. Configure the Dialog
 
 *   **Enable OCR Droid**: Check this box to activate the OCR functionality.
-*   **OCR Droid Protocol (Command Template)**: This is the most important part. You must provide the command that the app will use to run your OCR tool. Use the following placeholders which the app will replace for each subtitle stream:
-    *   {INPUT\_FILE\_PATH}: The full path to the temporary image subtitle file (e.g., a .sup or .sub file).
-    *   {OUTPUT\_SRT\_PATH}: The full path where the final .srt file should be saved.
-    *   {LANG\_3\_CODE}: The 3-letter language code of the stream (e.g., eng, fre). Note: Your OCR tool must support a language switch for this to be effective.
+*   **OCR Preset**: To simplify setup, you can select a preset for a known tool (e.g., "Subtitle Edit"). This will automatically fill the command template for you. You will still need to use the **Browse...** button to locate the tool's executable on your system.
+*   **OCR Droid Protocol (Command Template)**: If you use a custom tool or need to modify the command, you can edit this field directly. Use the following placeholders which the app will replace for each subtitle stream:
+    *   {INPUT_FILE_PATH}: The full path to the temporary image subtitle file (e.g., a .sup or .sub file).
+    *   {OUTPUT_SRT_PATH}: The full path where the final .srt file should be saved.
+    *   {LANG_3_CODE}: The 3-letter language code of the stream (e.g., eng, fre). Note: Your OCR tool must support a language switch for this to be effective.
 *   **Default Language**: The 3-letter code to use if a subtitle stream has no language metadata.
 
 ### 4\. Example Command Template (for Subtitle Edit)
