@@ -10,6 +10,7 @@ import datetime
 import tempfile
 import random
 import ctypes
+import concurrent.futures
 from config import AppConfig, LIGHT_THEME, DARK_THEME, OCR_PATIENCE_MESSAGES, MOVIE_EXTENSIONS, SUBTITLE_EXTENSIONS, IMAGE_BASED_CODECS, TEXT_BASED_OUTPUT_FORMATS
 from ui import SubtitleExtractorUI
 
@@ -158,6 +159,7 @@ class SubtitleExtractorApp:
         dialog.wait_window()
 
     def _on_closing_main(self):
+        self.settings['window_geometry'] = self.master.winfo_geometry()
         self.settings['theme'] = self.current_theme_name; self.config.save_config(self.extract_all_languages_flag, self.user_selected_languages)
         if self.log_window and self.log_window.winfo_exists(): self.log_window.destroy()
         self.master.destroy()
@@ -232,6 +234,32 @@ class SubtitleExtractorApp:
                     found_count += 1
         msg = f"Found {found_count} transmissions (movie files)." if found_count > 0 else "No transmissions detected in this sector."
         self.ui.status_label.config(text=msg); self.log_message(msg, to_console=False)
+
+    def open_file_location(self):
+        selected_items = self.ui.file_tree.selection()
+        if not selected_items:
+            return
+        file_path = selected_items[0]
+        try:
+            if os.name == 'nt':
+                subprocess.run(['explorer', '/select,', os.path.normpath(file_path)])
+            elif 'darwin' in sys.platform:
+                subprocess.run(['open', '-R', file_path])
+            elif 'linux' in sys.platform:
+                subprocess.run(['xdg-open', os.path.dirname(file_path)])
+        except Exception as e:
+            self.log_message(f"Error opening file location for {os.path.basename(file_path)}: {e}", to_console=True)
+            messagebox.showerror("Error", f"Could not open file location:\n{e}", parent=self.master)
+
+    def copy_file_path(self):
+        selected_items = self.ui.file_tree.selection()
+        if not selected_items:
+            return
+        file_path = selected_items[0]
+        self.master.clipboard_clear()
+        self.master.clipboard_append(file_path)
+        self.log_message(f"Copied path to clipboard: {file_path}", to_console=False)
+        self.ui.status_label.config(text=f"Copied path: {os.path.basename(file_path)}")
 
     def remove_selected_files(self):
         selected_items = self.ui.file_tree.selection()
@@ -310,6 +338,9 @@ class SubtitleExtractorApp:
 
     def _update_progress_safe(self, value):
         self.master.after(0, lambda: self.ui.progress_var.set(value))
+
+    def _update_file_status_safe(self, file_path_iid, new_status):
+        self.master.after(0, lambda: self.ui.file_tree.set(file_path_iid, "Status", new_status))
 
     def _extraction_finished_safe(self, summary_message=None):
         if self.cancel_requested.is_set():
@@ -436,152 +467,180 @@ class SubtitleExtractorApp:
         return ocr_success
 
     def _extract_subtitles_logic(self, files_to_process):
-        total_files = len(files_to_process); overall_subs_extracted_count = 0; processed_for_progress_count = 0
-        selected_gui_output_format = self.ui.output_format_var.get()
-        self.log_message(f"Using output format: {selected_gui_output_format}", to_console=True)
-        self.log_message(f"Language filter: {self._get_current_lang_filter_display()}", to_console=True)
-        if self.settings.get('ocr_enabled') and self.settings.get('ocr_command_template'):
-            self.log_message(f"[OCR STATUS] OCR Droid is ONLINE. Protocol: {self.settings['ocr_command_template'][:50]}...", to_console=True)
-        else:
-            self.log_message("[OCR STATUS] OCR Droid OFFLINE or no protocol. Image subs will be copied or skipped (if text output chosen).", to_console=True)
+        total_files = len(files_to_process)
+        if total_files == 0:
+            self._extraction_finished_safe("No targets to process.")
+            return
 
-        for i, movie_file_path in enumerate(files_to_process):
-            if self.cancel_requested.is_set():
-                break
-
-            movie_filename = os.path.basename(movie_file_path); current_file_had_error_flag = False
-            general_status_for_file = f"Scanning target ({i + 1}/{total_files}): {movie_filename}"
-            self._update_status_safe(general_status_for_file)
-            self._update_progress_safe((processed_for_progress_count / total_files) * 100 if total_files > 0 else 0)
-
-            self.log_message(f"\n[INFO] Processing target ({i + 1}/{total_files}): {movie_file_path}")
-            movie_dir = os.path.dirname(movie_file_path); base_name_no_ext = os.path.splitext(movie_filename)[0]
-            file_subs_extracted_this_file = 0; file_processed_or_skipped_this_iteration = False
-            try:
-                cmd_probe = [self.settings['ffprobe_path'], '-v', 'error', '-show_entries', 'stream=index,codec_type,codec_name:stream_tags=language', '-select_streams', 's', '-of', 'csv=p=0', movie_file_path]
-                self.log_message(f"[FFPROBE CMD] {' '.join(cmd_probe)}")
-                probe_process = subprocess.Popen(cmd_probe, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding='utf-8', creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
-                stdout, stderr = probe_process.communicate(timeout=self.settings['ffprobe_timeout'])
-                self.log_message(f"[FFPROBE STDOUT for {movie_filename}]:\n{stdout.strip() if stdout.strip() else '<no subtitle signals detected>'}")
-                if stderr and stderr.strip(): self.log_message(f"[FFPROBE STDERR for {movie_filename}]:\n{stderr.strip()}")
-                self.log_message(f"[FFPROBE RETURN CODE for {movie_filename}]: {probe_process.returncode}")
-                if probe_process.returncode != 0:
-                    self.log_message(f"[ERROR] FFprobe malfunctioned for {movie_filename}. RC: {probe_process.returncode}. Aborting target.", to_console=True)
-                    if not current_file_had_error_flag: self.files_with_errors.append(movie_filename); current_file_had_error_flag = True
-                    file_processed_or_skipped_this_iteration = True; continue
-                subtitle_streams_from_probe = []
-                if stdout.strip():
-                    lines = stdout.strip().split('\n')
-                    for line_content in lines:
-                        parts = line_content.strip().split(',');
-                        if len(parts) < 3: continue
-                        stream_index_str, codec_type_from_probe, codec_name_from_probe = parts[0].strip(), parts[1].strip().lower(), parts[2].strip().lower()
-                        actual_codec_name = "unknown"; is_subtitle_stream = False
-                        if codec_type_from_probe == 'subtitle': is_subtitle_stream = True; actual_codec_name = codec_name_from_probe
-                        elif codec_name_from_probe == 'subtitle': is_subtitle_stream = True; actual_codec_name = codec_type_from_probe
-                        elif codec_type_from_probe in IMAGE_BASED_CODECS or codec_type_from_probe in TEXT_BASED_OUTPUT_FORMATS: is_subtitle_stream = True; actual_codec_name = codec_type_from_probe
-                        if is_subtitle_stream:
-                            language_str = "und";
-                            if len(parts) > 3 and parts[3].strip(): language_str = parts[3].strip().lower()
-                            subtitle_streams_from_probe.append({"index": stream_index_str, "lang": language_str, "codec": actual_codec_name})
-                            self.log_message(f"[DEBUG]   -> Detected signal: Idx='{stream_index_str}',Lang='{language_str}',Codec='{actual_codec_name}'")
-                if not subtitle_streams_from_probe:
-                    self.log_message(f"[INFO] No subtitle signals found/parsed for {movie_filename}."); self.files_with_no_subs.append(movie_filename)
-                    file_processed_or_skipped_this_iteration = True; continue
-                streams_to_extract_this_file = []
-                if self.extract_all_languages_flag: streams_to_extract_this_file = subtitle_streams_from_probe
-                else:
-                    for stream_info in subtitle_streams_from_probe:
-                        if stream_info["lang"] in self.user_selected_languages: streams_to_extract_this_file.append(stream_info)
-                self.log_message(f"[INFO] Filtered to {len(streams_to_extract_this_file)} signal(s) for {movie_filename} based on language selection: {self.user_selected_languages if not self.extract_all_languages_flag else 'All (Galactic Basic)'}")
-                if not streams_to_extract_this_file:
-                    self.log_message(f"[INFO] No signals match language filter for {movie_filename}. Skipping this target's subtitle extraction.")
-                    file_processed_or_skipped_this_iteration = True; continue
-
-                self._update_status_safe(f"Processing subtitle signals for {movie_filename}...")
-
-                for stream_info in streams_to_extract_this_file:
-                    if self.cancel_requested.is_set(): break
-                    
-                    stream_idx, lang_code, input_codec = stream_info["index"], stream_info["lang"], stream_info["codec"].lower()
-                    safe_lang_code = re.sub(r'[^a-zA-Z0-9_.-]', '', lang_code) or "und"
-                    output_target_format_gui = selected_gui_output_format.lower()
-                    ffmpeg_codec_arg_for_direct_extract = output_target_format_gui; final_output_extension = f".{output_target_format_gui}"
-                    run_ocr = False; use_direct_ffmpeg_extract = True
-                    if output_target_format_gui == 'copy':
-                        ffmpeg_codec_arg_for_direct_extract = 'copy'
-                        if input_codec in ['subrip', 'srt']: final_output_extension = ".srt"
-                        elif input_codec == 'ass': final_output_extension = ".ass"
-                        elif input_codec in ['webvtt', 'vtt']: final_output_extension = ".vtt"
-                        elif input_codec == 'mov_text': ffmpeg_codec_arg_for_direct_extract = 'srt'; final_output_extension = '.srt'; self.log_message(f"[INFO] Forcing mov_text (signal {stream_idx}, lang {lang_code}) to SRT for comlink compatibility, despite 'copy' order.", to_console=True)
-                        elif input_codec in IMAGE_BASED_CODECS: final_output_extension = self.settings['ocr_input_ext_map'].get(input_codec, f".{input_codec}"); self.log_message(f"[INFO] Copying image-based signal '{input_codec}' (stream {stream_idx}, lang {lang_code}) as is. Output ext: {final_output_extension}", to_console=True)
-                        else: final_output_extension = f".{input_codec}"; self.log_message(f"[WARN] Copying unknown signal type '{input_codec}' (stream {stream_idx}, lang {lang_code}). Extension: '{final_output_extension}'.", to_console=True)
-                    elif output_target_format_gui in TEXT_BASED_OUTPUT_FORMATS:
-                        if input_codec in IMAGE_BASED_CODECS:
-                            if self.settings.get('ocr_enabled') and self.settings.get('ocr_command_template'):
-                                run_ocr = True; use_direct_ffmpeg_extract = False
-                            else:
-                                self.log_message(f"[INFO] Skipping image-based signal {stream_idx} ({input_codec}, lang {lang_code}) for {movie_filename}. Cannot convert to {output_target_format_gui.upper()} without OCR Droid. Use 'copy' or deploy OCR Droid via Holocron (Config).", to_console=True)
-                                if not current_file_had_error_flag: self.files_with_errors.append(movie_filename); current_file_had_error_flag = True
-                                continue
-                        elif input_codec == 'mov_text':
-                            self.log_message(f"[INFO] Translating mov_text (signal {stream_idx}, lang {lang_code}) to {output_target_format_gui.upper()}.", to_console=True)
-                    else:
-                        self.log_message(f"[ERROR] Unexpected output format '{output_target_format_gui}' for signal {stream_idx}. Skipping.", to_console=True)
-                        if not current_file_had_error_flag: self.files_with_errors.append(movie_filename); current_file_had_error_flag = True
-                        continue
-
-                    sub_filename_out = f"{base_name_no_ext}.{safe_lang_code}.{stream_idx}{final_output_extension}"
-                    output_path = os.path.join(movie_dir, sub_filename_out)
-                    extraction_successful_this_stream = False
-                    if run_ocr:
-                        if self._run_ocr_on_image_sub(movie_file_path, base_name_no_ext, stream_idx, lang_code, input_codec, output_path): extraction_successful_this_stream = True
-                        else:
-                            if not current_file_had_error_flag: self.files_with_errors.append(movie_filename); current_file_had_error_flag = True
-                        self._update_status_safe(f"OCR Droid finished with {safe_lang_code} for {movie_filename}. Stand by...")
-                    elif use_direct_ffmpeg_extract:
-                        self._update_status_safe(f"Extracting signal {safe_lang_code} (idx {stream_idx}) as {ffmpeg_codec_arg_for_direct_extract.upper()} from {movie_filename}...")
-                        cmd_extract = [self.settings['ffmpeg_path'], '-y', '-analyzeduration', '100M', '-probesize', '100M', '-i', movie_file_path, '-map', f'0:{stream_idx}', '-c:s', ffmpeg_codec_arg_for_direct_extract, output_path]
-                        self.log_message(f"[FFMPEG CMD] {' '.join(cmd_extract)}")
-                        extract_process = subprocess.Popen(cmd_extract, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding='utf-8', creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
-                        _, ext_stderr = extract_process.communicate(timeout=self.settings['ffmpeg_extract_timeout'])
-                        if ext_stderr and ext_stderr.strip():
-                            self.log_message(f"[FFMPEG STDERR for {sub_filename_out}]:\n{ext_stderr.strip()}")
-                            if "file ended prematurely" in ext_stderr.lower():
-                                self.log_message("[INFO] Note: The 'file ended prematurely' message from FFmpeg is often non-critical for subtitle streams and may not indicate a failure.", to_console=False)
-                        self.log_message(f"[FFMPEG RETURN CODE for {sub_filename_out}]: {extract_process.returncode}")
-                        if extract_process.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 0: extraction_successful_this_stream = True
-                        elif extract_process.returncode == 0: self.log_message(f"[WARNING] FFmpeg reported success, but output datapad '{output_path}' is empty or missing.", to_console=True)
-                    else:
-                        self.log_message(f"[ERROR] Internal logic error for signal {stream_idx}. Cannot determine extraction method. Skipping.", to_console=True)
-                        if not current_file_had_error_flag: self.files_with_errors.append(movie_filename); current_file_had_error_flag = True
-                        continue
-
-                    if extraction_successful_this_stream:
-                        file_subs_extracted_this_file += 1
-                        self.log_message(f"[SUCCESS] Successfully decoded stream {stream_idx} ({lang_code}) from {movie_filename} to {os.path.basename(output_path)}", to_console=True)
-                
-                if file_subs_extracted_this_file > 0:
-                    overall_subs_extracted_count += file_subs_extracted_this_file
-                    self.files_with_success.append(movie_filename)
-                    self.log_message(f"[INFO] Target {movie_filename} processed, {file_subs_extracted_this_file} signal(s) decoded.")
-                elif not current_file_had_error_flag and movie_filename not in self.files_with_no_subs and movie_filename not in self.files_with_errors:
-                    self.log_message(f"[INFO] Target {movie_filename} processed, no suitable signals decoded/translated.")
-                file_processed_or_skipped_this_iteration = True
-
-            except subprocess.TimeoutExpired:
-                self.log_message(f"[TIMEOUT] Comlink lost processing {movie_filename}. Skipping target.", to_console=True); self.files_timed_out.append(movie_filename); file_processed_or_skipped_this_iteration = True
-                self._update_status_safe(f"Comlink lost with {movie_filename}. Moving to next target.")
-            except Exception as e:
-                self.log_message(f"[CRITICAL SYSTEM ERROR] Unexpected asteroid field encountered with {movie_filename}: {e}", to_console=True); import traceback; self.log_message(traceback.format_exc(), to_console=True)
-                if not current_file_had_error_flag: self.files_with_errors.append(movie_filename)
-                file_processed_or_skipped_this_iteration = True
-                self._update_status_safe(f"Error with {movie_filename}. Jumping to next system.")
-            finally:
-                if file_processed_or_skipped_this_iteration: processed_for_progress_count += 1
-                self._update_progress_safe((processed_for_progress_count / total_files) * 100 if total_files > 0 else 0)
+        processed_count = 0
+        overall_subs_extracted_count = 0
         
-        summary_message = f"Mission Report: {processed_for_progress_count}/{total_files} targets engaged. "
-        if overall_subs_extracted_count > 0: summary_message += f"{overall_subs_extracted_count} subtitle signal(s) successfully decoded."
-        else: summary_message += "No subtitle signals were decoded in this operation."
+        # Set initial status to "Queued"
+        for file_path in files_to_process:
+            self._update_file_status_safe(file_path, "Queued")
+
+        selected_gui_output_format = self.ui.output_format_var.get()
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=self.settings['concurrent_tasks']) as executor:
+            future_to_file = {executor.submit(self._process_single_file, file_path, selected_gui_output_format): file_path for file_path in files_to_process}
+            
+            for future in concurrent.futures.as_completed(future_to_file):
+                file_path = future_to_file[future]
+                try:
+                    subs_extracted, status_message = future.result()
+                    if subs_extracted > 0:
+                        overall_subs_extracted_count += subs_extracted
+                    self._update_file_status_safe(file_path, status_message)
+                except Exception as exc:
+                    self.log_message(f'{os.path.basename(file_path)} generated an exception: {exc}', to_console=True)
+                    self._update_file_status_safe(file_path, "Failed")
+                finally:
+                    processed_count += 1
+                    self._update_progress_safe((processed_count / total_files) * 100)
+                    self._update_status_safe(f"Completed {processed_count}/{total_files} files.")
+
+        summary_message = f"Mission Report: {processed_count}/{total_files} targets engaged. "
+        if overall_subs_extracted_count > 0:
+            summary_message += f"{overall_subs_extracted_count} subtitle signal(s) successfully decoded."
+        else:
+            summary_message += "No subtitle signals were decoded in this operation."
         self._extraction_finished_safe(summary_message)
+
+    def _process_single_file(self, movie_file_path, selected_gui_output_format):
+        if self.cancel_requested.is_set():
+            return 0, "Cancelled"
+
+        movie_filename = os.path.basename(movie_file_path)
+        self.log_message(f"[INFO] Processing file: {movie_filename}", to_console=False)
+        self._update_file_status_safe(movie_file_path, "Processing...")
+
+        file_subs_extracted_this_file = 0
+        current_file_had_error_flag = False
+        
+        try:
+            movie_dir = os.path.dirname(movie_file_path)
+            base_name_no_ext = os.path.splitext(movie_filename)[0]
+
+            cmd_probe = [self.settings['ffprobe_path'], '-v', 'error', '-show_entries', 'stream=index,codec_type,codec_name:stream_tags=language', '-select_streams', 's', '-of', 'csv=p=0', movie_file_path]
+            self.log_message(f"[INFO] Probing for subtitle streams in {movie_filename}", to_console=False)
+            probe_process = subprocess.Popen(cmd_probe, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding='utf-8', creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
+            stdout, stderr = probe_process.communicate(timeout=self.settings['ffprobe_timeout'])
+
+            if probe_process.returncode != 0:
+                self.log_message(f"[ERROR] FFprobe malfunctioned for {movie_filename}. RC: {probe_process.returncode}. Aborting target.", to_console=True)
+                self.files_with_errors.append(movie_filename)
+                return 0, "Failed"
+
+            subtitle_streams_from_probe = []
+            if stdout.strip():
+                lines = stdout.strip().split('\n')
+                for line_content in lines:
+                    parts = line_content.strip().split(',')
+                    if len(parts) < 3: continue
+                    stream_index_str, codec_type_from_probe, codec_name_from_probe = parts[0].strip(), parts[1].strip().lower(), parts[2].strip().lower()
+                    actual_codec_name = "unknown"; is_subtitle_stream = False
+                    if codec_type_from_probe == 'subtitle': is_subtitle_stream = True; actual_codec_name = codec_name_from_probe
+                    elif codec_name_from_probe == 'subtitle': is_subtitle_stream = True; actual_codec_name = codec_type_from_probe
+                    elif codec_type_from_probe in IMAGE_BASED_CODECS or codec_type_from_probe in TEXT_BASED_OUTPUT_FORMATS: is_subtitle_stream = True; actual_codec_name = codec_type_from_probe
+                    if is_subtitle_stream:
+                        language_str = "und"
+                        if len(parts) > 3 and parts[3].strip(): language_str = parts[3].strip().lower()
+                        subtitle_streams_from_probe.append({"index": stream_index_str, "lang": language_str, "codec": actual_codec_name})
+
+            if not subtitle_streams_from_probe:
+                self.log_message(f"[INFO] No subtitle streams found in {movie_filename}", to_console=False)
+                self.files_with_no_subs.append(movie_filename)
+                return 0, "No subtitles found"
+
+            streams_to_extract_this_file = []
+            if self.extract_all_languages_flag:
+                streams_to_extract_this_file = subtitle_streams_from_probe
+            else:
+                for stream_info in subtitle_streams_from_probe:
+                    if stream_info["lang"] in self.user_selected_languages:
+                        streams_to_extract_this_file.append(stream_info)
+
+            if not streams_to_extract_this_file:
+                if not self.extract_all_languages_flag:
+                    self.log_message(f"[INFO] No subtitle streams in '{movie_filename}' matched the selected languages: {', '.join(self.user_selected_languages)}", to_console=False)
+                return 0, "Completed"
+
+            for stream_info in streams_to_extract_this_file:
+                if self.cancel_requested.is_set(): break
+                
+                stream_idx, lang_code, input_codec = stream_info["index"], stream_info["lang"], stream_info["codec"].lower()
+                safe_lang_code = re.sub(r'[^a-zA-Z0-9_.-]', '', lang_code) or "und"
+                output_target_format_gui = selected_gui_output_format.lower()
+                ffmpeg_codec_arg_for_direct_extract = output_target_format_gui
+                final_output_extension = f".{output_target_format_gui}"
+                run_ocr = False
+                use_direct_ffmpeg_extract = True
+
+                if output_target_format_gui == 'copy':
+                    ffmpeg_codec_arg_for_direct_extract = 'copy'
+                    if input_codec in ['subrip', 'srt']: final_output_extension = ".srt"
+                    elif input_codec == 'ass': final_output_extension = ".ass"
+                    elif input_codec in ['webvtt', 'vtt']: final_output_extension = ".vtt"
+                    elif input_codec == 'mov_text':
+                        ffmpeg_codec_arg_for_direct_extract = 'srt'
+                        final_output_extension = '.srt'
+                    elif input_codec in IMAGE_BASED_CODECS:
+                        final_output_extension = self.settings['ocr_input_ext_map'].get(input_codec, f".{input_codec}")
+                    else:
+                        final_output_extension = f".{input_codec}"
+                elif output_target_format_gui in TEXT_BASED_OUTPUT_FORMATS:
+                    if input_codec in IMAGE_BASED_CODECS:
+                        if self.settings.get('ocr_enabled') and self.settings.get('ocr_command_template'):
+                            run_ocr = True
+                            use_direct_ffmpeg_extract = False
+                        else:
+                            current_file_had_error_flag = True
+                            continue
+                    elif input_codec == 'mov_text':
+                        pass # It will be converted
+                else:
+                    current_file_had_error_flag = True
+                    continue
+
+                sub_filename_out = f"{base_name_no_ext}.{safe_lang_code}.{stream_idx}{final_output_extension}"
+                output_path = os.path.join(movie_dir, sub_filename_out)
+                extraction_successful_this_stream = False
+
+                if run_ocr:
+                    if self._run_ocr_on_image_sub(movie_file_path, base_name_no_ext, stream_idx, lang_code, input_codec, output_path):
+                        extraction_successful_this_stream = True
+                    else:
+                        current_file_had_error_flag = True
+                elif use_direct_ffmpeg_extract:
+                    cmd_extract = [self.settings['ffmpeg_path'], '-y', '-analyzeduration', '100M', '-probesize', '100M', '-i', movie_file_path, '-map', f'0:{stream_idx}', '-c:s', ffmpeg_codec_arg_for_direct_extract, output_path]
+                    extract_process = subprocess.Popen(cmd_extract, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding='utf-8', creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
+                    _, ext_stderr = extract_process.communicate(timeout=self.settings['ffmpeg_extract_timeout'])
+                    
+                    if extract_process.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+                        extraction_successful_this_stream = True
+
+                if extraction_successful_this_stream:
+                    self.log_message(f"[INFO] Successfully extracted stream {stream_idx} ({lang_code}) from {movie_filename}", to_console=False)
+                    file_subs_extracted_this_file += 1
+
+            if file_subs_extracted_this_file > 0:
+                self.log_message(f"[INFO] Finished processing {movie_filename}. Extracted {file_subs_extracted_this_file} subtitle stream(s).", to_console=False)
+                self.files_with_success.append(movie_filename)
+                return file_subs_extracted_this_file, "Completed"
+            elif current_file_had_error_flag:
+                self.files_with_errors.append(movie_filename)
+                return 0, "Failed"
+            else:
+                self.log_message(f"[INFO] Finished processing {movie_filename}. No new subtitles were extracted.", to_console=False)
+                return 0, "Completed"
+
+        except subprocess.TimeoutExpired:
+            self.log_message(f"[TIMEOUT] Comlink lost processing {movie_filename}. Skipping target.", to_console=True)
+            self.files_timed_out.append(movie_filename)
+            return 0, "Failed"
+        except Exception as e:
+            self.log_message(f"[CRITICAL SYSTEM ERROR] Unexpected asteroid field encountered with {movie_filename}: {e}", to_console=True)
+            import traceback
+            self.log_message(traceback.format_exc(), to_console=True)
+            self.files_with_errors.append(movie_filename)
+            return 0, "Failed"
