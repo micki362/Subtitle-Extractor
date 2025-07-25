@@ -54,10 +54,6 @@ class SubtitleExtractorApp:
                 print(f"Error creating log dir: {e}")
                 self.log_dir_path = None
 
-    def on_skip_toggle(self):
-        self.settings['skip_if_exists'] = self.ui.skip_if_exists_var.get()
-        self.log_message(f"Skip-if-exists set to: {self.settings['skip_if_exists']}", to_console=False)
-
     def _parse_loaded_languages(self):
         loaded_lang_str = self.settings.get('selected_languages', 'all').strip().lower()
         if not loaded_lang_str or loaded_lang_str == 'all':
@@ -84,7 +80,7 @@ class SubtitleExtractorApp:
         if not self.movie_files_paths:
             messagebox.showinfo("No Targets", "Scan a star system (folder) first, Commander.", parent=self.master)
             return
-        current_files_in_listbox = [self.movie_files_paths[i] for i in range(self.ui.file_listbox.size()) if i < len(self.movie_files_paths)]
+        current_files_in_listbox = self.ui.file_tree.get_children()
         if not current_files_in_listbox:
             messagebox.showinfo("No Targets", "No transmissions (files) in the list to scan for languages.", parent=self.master)
             return
@@ -231,7 +227,7 @@ class SubtitleExtractorApp:
                 if file.lower().endswith(MOVIE_EXTENSIONS):
                     full_path = os.path.join(root, file)
                     self.movie_files_paths.append(full_path)
-                    status = "Subtitles Present" if self._check_for_existing_subs(full_path) else "Ready to Extract"
+                    status = self._get_file_status(full_path)
                     self.ui.file_tree.insert("", tk.END, values=(os.path.basename(file), status), iid=full_path)
                     found_count += 1
         msg = f"Found {found_count} transmissions (movie files)." if found_count > 0 else "No transmissions detected in this sector."
@@ -343,12 +339,34 @@ class SubtitleExtractorApp:
         messagebox.showinfo("Mission Complete", (summary_message or "Extraction run complete, Commander.") + "\n\nCheck Mission Debrief (Log) for details.", parent=self.master)
         self._toggle_extraction_controls(is_extracting=False)
 
-        for item in self.ui.file_tree.get_children():
-            file_path = self.ui.file_tree.item(item, "values")[0]
-            if file_path in self.files_with_success:
-                self.ui.file_tree.set(item, "Status", "Completed")
-            elif file_path in self.files_with_errors or file_path in self.files_timed_out:
-                self.ui.file_tree.set(item, "Status", "Failed")
+        for item_id in self.ui.file_tree.get_children():
+            # In the treeview, the iid is the full path
+            file_path_iid = item_id
+            file_basename = self.ui.file_tree.item(file_path_iid, "values")[0]
+
+            if file_basename in self.files_with_success:
+                self.ui.file_tree.set(file_path_iid, "Status", "Completed")
+            elif file_basename in self.files_with_errors or file_basename in self.files_timed_out:
+                self.ui.file_tree.set(file_path_iid, "Status", "Failed")
+            # No need to handle other cases, as their initial status remains valid.
+
+    def _get_file_status(self, movie_file_path):
+        if self._check_for_existing_subs(movie_file_path):
+            return "Subtitles Present"
+        try:
+            cmd_probe = [self.settings['ffprobe_path'], '-v', 'error', '-select_streams', 's', '-show_entries', 'stream=codec_type', '-of', 'csv=p=0', movie_file_path]
+            process = subprocess.Popen(cmd_probe, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding='utf-8', creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
+            stdout, _ = process.communicate(timeout=self.settings['ffprobe_timeout'])
+            if stdout.strip():
+                return "Ready to Extract"
+            else:
+                return "No subtitles found"
+        except subprocess.TimeoutExpired:
+            self.log_message(f"Timeout checking status of {os.path.basename(movie_file_path)}", to_console=True)
+            return "Error"
+        except Exception as e:
+            self.log_message(f"Error checking status of {os.path.basename(movie_file_path)}: {e}", to_console=True)
+            return "Error"
 
     def _check_for_existing_subs(self, movie_file_path):
         movie_dir = os.path.dirname(movie_file_path)
@@ -435,14 +453,6 @@ class SubtitleExtractorApp:
             general_status_for_file = f"Scanning target ({i + 1}/{total_files}): {movie_filename}"
             self._update_status_safe(general_status_for_file)
             self._update_progress_safe((processed_for_progress_count / total_files) * 100 if total_files > 0 else 0)
-            
-            if self.settings.get('skip_if_exists'):
-                if self._check_for_existing_subs(movie_file_path):
-                    self.log_message(f"\n[INFO] Skipping target ({i + 1}/{total_files}): {movie_filename} - Existing subtitle file found.")
-                    self.files_skipped.append(movie_filename)
-                    processed_for_progress_count += 1
-                    self._update_progress_safe((processed_for_progress_count / total_files) * 100 if total_files > 0 else 0)
-                    continue
 
             self.log_message(f"\n[INFO] Processing target ({i + 1}/{total_files}): {movie_file_path}")
             movie_dir = os.path.dirname(movie_file_path); base_name_no_ext = os.path.splitext(movie_filename)[0]
