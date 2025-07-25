@@ -3,7 +3,7 @@ from tkinter import ttk, filedialog, messagebox, scrolledtext
 import os
 import sys
 import subprocess
-from config import LIGHT_THEME, DARK_THEME
+from config import LIGHT_THEME, DARK_THEME, OCR_PRESETS
 
 class SubtitleExtractorUI:
     def __init__(self, master, app_logic):
@@ -13,7 +13,7 @@ class SubtitleExtractorUI:
         self.current_theme = self.logic.current_theme
 
         master.title("Bulk Subtitle Extractor")
-        master.geometry("800x700")
+        master.geometry(self.settings.get('window_geometry', '800x700'))
 
         self.style = ttk.Style()
         self._create_widgets()
@@ -47,6 +47,13 @@ class SubtitleExtractorUI:
         self.file_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         self.scrollbar_y.config(command=self.file_tree.yview)
         self.scrollbar_y.pack(side=tk.RIGHT, fill=tk.Y)
+
+        self.context_menu = tk.Menu(self.file_tree, tearoff=0)
+        self.context_menu.add_command(label="Open File Location", command=self.logic.open_file_location)
+        self.context_menu.add_command(label="Copy Path", command=self.logic.copy_file_path)
+        self.context_menu.add_separator()
+        self.context_menu.add_command(label="Remove from List", command=self.logic.remove_selected_files)
+        self.file_tree.bind("<Button-3>", self.show_context_menu)
 
     def _create_options_widgets(self):
         self.options_ui_frame = ttk.Frame(self.main_frame_container)
@@ -162,6 +169,19 @@ class SubtitleExtractorUI:
         ttk.Checkbutton(content_frame, text="Enable OCR Droid (for image-based subtitles)",
                         variable=ocr_enabled_var, style="TCheckbutton").pack(anchor='w', pady=(0, 10))
 
+        ttk.Label(content_frame, text="OCR Preset:").pack(anchor='w')
+        preset_var = tk.StringVar()
+        preset_options = ["Custom"] + list(OCR_PRESETS.keys())
+        preset_combo = ttk.Combobox(content_frame, textvariable=preset_var, values=preset_options, state="readonly")
+        preset_combo.pack(anchor='w', fill=tk.X, pady=(0, 10))
+        
+        def on_preset_select(event):
+            selected_preset = preset_var.get()
+            if selected_preset in OCR_PRESETS:
+                ocr_cmd_var.set(OCR_PRESETS[selected_preset])
+
+        preset_combo.bind("<<ComboboxSelected>>", on_preset_select)
+
         ttk.Label(content_frame, text="OCR Droid Protocol (Command Template):").pack(anchor='w')
         cmd_frame = ttk.Frame(content_frame)
         cmd_frame.pack(fill=tk.X, expand=True, pady=(0, 10))
@@ -224,3 +244,16 @@ class SubtitleExtractorUI:
         for child in log_button_frame.winfo_children():
             if isinstance(child, ttk.Button): child.configure(style="TButton")
         self.logic.log_window.protocol("WM_DELETE_WINDOW", self.logic._on_closing_log_window)
+
+    def show_context_menu(self, event):
+        selection = self.file_tree.identify_row(event.y)
+        if selection:
+            if selection not in self.file_tree.selection():
+                self.file_tree.selection_set(selection)
+            self.context_menu.post(event.x_root, event.y_root)
+
+    def update_file_status(self, file_path, status):
+        try:
+            self.file_tree.set(file_path, "Status", status)
+        except tk.TclError:
+            self.logic.log_message(f"Could not update status for non-existent item: {os.path.basename(file_path)}", to_console=True)
