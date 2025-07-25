@@ -72,10 +72,6 @@ class SubtitleExtractorUI:
 
         self.action_buttons_frame = ttk.Frame(self.options_ui_frame)
         self.action_buttons_frame.pack(side=tk.RIGHT, fill=tk.Y)
-        self.skip_if_exists_var = tk.BooleanVar(value=self.settings['skip_if_exists'])
-        self.skip_checkbox = ttk.Checkbutton(self.action_buttons_frame, text="Skip if exists",
-                                             variable=self.skip_if_exists_var, command=self.logic.on_skip_toggle, style="TCheckbutton")
-        self.skip_checkbox.pack(side=tk.LEFT, padx=(0, 10))
         self.remove_button = ttk.Button(self.action_buttons_frame, text="Remove Selected", command=self.logic.remove_selected_files)
         self.remove_button.pack(side=tk.RIGHT, padx=5)
         self.remove_with_subs_button = ttk.Button(self.action_buttons_frame, text="Remove with Subtitles", command=self.logic.remove_files_with_subtitles)
@@ -137,7 +133,6 @@ class SubtitleExtractorUI:
         self.select_folder_button.configure(style="TButton"); self.remove_button.configure(style="TButton"); self.view_log_button.configure(style="TButton")
         self.theme_button.configure(style="TButton"); self.edit_config_button.configure(style="TButton"); self.select_langs_button.configure(style="TButton")
         self.ocr_settings_button.configure(style="TButton")
-        self.skip_checkbox.configure(style="TCheckbutton")
         self.extract_button.configure(style="Accent.TButton")
 
     def open_config_file(self):
