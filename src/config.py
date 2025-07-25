@@ -10,6 +10,7 @@ DEFAULT_FFPROBE_PATH = "ffprobe"
 DEFAULT_FFPROBE_TIMEOUT = 60
 DEFAULT_FFMPEG_EXTRACT_TIMEOUT = 600
 DEFAULT_FFMPEG_OCR_TIMEOUT = 1800 # 30 minutes for OCR
+DEFAULT_CONCURRENT_TASKS = 4
 LOG_FOLDER_NAME = "logs"
 CONFIG_FILENAME = "sub_extractor_settings.ini"
 
@@ -43,15 +44,21 @@ OCR_PATIENCE_MESSAGES = [
     "Never tell me the odds! OCRing {filename} is in progress..."
 ]
 
+OCR_PRESETS = {
+    "Subtitle Edit (Tesseract)": '"{exe_path}" /convert "{input_file}" srt /outputfolder:"{output_folder}" /ocrengine:Tesseract /ocrlanguage:{lang_code}',
+    "VobSub2SRT": '"{exe_path}" --lang {lang_code} "{input_file}"'
+}
+
 class AppConfig:
     def __init__(self, app_dir):
         self.app_dir = app_dir
         self.settings = {
-            'theme': 'light', 'last_folder': '',
+            'theme': 'light', 'last_folder': '', 'window_geometry': '800x700',
             'ffmpeg_path': DEFAULT_FFMPEG_PATH, 'ffprobe_path': DEFAULT_FFPROBE_PATH,
             'ffprobe_timeout': DEFAULT_FFPROBE_TIMEOUT,
             'ffmpeg_extract_timeout': DEFAULT_FFMPEG_EXTRACT_TIMEOUT,
             'ffmpeg_ocr_timeout': DEFAULT_FFMPEG_OCR_TIMEOUT,
+            'concurrent_tasks': DEFAULT_CONCURRENT_TASKS,
             'default_output_format': 'srt', 'selected_languages': 'all',
             'ocr_enabled': False, 'ocr_command_template': '', 'ocr_temp_dir': '',
             'ocr_default_lang': 'eng',
@@ -78,11 +85,13 @@ class AppConfig:
                 return fallback
         self.settings['theme'] = get_cfg('General', 'theme', self.settings['theme'])
         self.settings['last_folder'] = get_cfg('General', 'last_folder', self.settings['last_folder'])
+        self.settings['window_geometry'] = get_cfg('General', 'window_geometry', self.settings['window_geometry'])
         self.settings['ffmpeg_path'] = get_cfg('Paths', 'ffmpeg_path', self.settings['ffmpeg_path'])
         self.settings['ffprobe_path'] = get_cfg('Paths', 'ffprobe_path', self.settings['ffprobe_path'])
         self.settings['ffprobe_timeout'] = get_cfg('Timeouts', 'ffprobe_timeout', self.settings['ffprobe_timeout'], type_func=int)
         self.settings['ffmpeg_extract_timeout'] = get_cfg('Timeouts', 'ffmpeg_extract_timeout', self.settings['ffmpeg_extract_timeout'], type_func=int)
         self.settings['ffmpeg_ocr_timeout'] = get_cfg('Timeouts', 'ffmpeg_ocr_timeout', self.settings['ffmpeg_ocr_timeout'], type_func=int)
+        self.settings['concurrent_tasks'] = get_cfg('Timeouts', 'concurrent_tasks', self.settings['concurrent_tasks'], type_func=int)
         self.settings['default_output_format'] = get_cfg('Extraction', 'default_output_format', self.settings['default_output_format'])
         self.settings['selected_languages'] = get_cfg('Extraction', 'selected_languages', self.settings['selected_languages'])
         self.settings['ocr_enabled'] = get_cfg('OCR', 'ocr_enabled', self.settings['ocr_enabled'], type_func=bool)
@@ -100,11 +109,13 @@ class AppConfig:
         config_path = self.get_config_path()
         self.config.set('General', 'theme', self.settings['theme'])
         self.config.set('General', 'last_folder', self.settings['last_folder'])
+        self.config.set('General', 'window_geometry', self.settings.get('window_geometry', '800x700'))
         self.config.set('Paths', 'ffmpeg_path', self.settings['ffmpeg_path'])
         self.config.set('Paths', 'ffprobe_path', self.settings['ffprobe_path'])
         self.config.set('Timeouts', 'ffprobe_timeout', str(self.settings['ffprobe_timeout']))
         self.config.set('Timeouts', 'ffmpeg_extract_timeout', str(self.settings['ffmpeg_extract_timeout']))
         self.config.set('Timeouts', 'ffmpeg_ocr_timeout', str(self.settings.get('ffmpeg_ocr_timeout', DEFAULT_FFMPEG_OCR_TIMEOUT)))
+        self.config.set('Timeouts', 'concurrent_tasks', str(self.settings.get('concurrent_tasks', DEFAULT_CONCURRENT_TASKS)))
         self.config.set('Extraction', 'default_output_format', self.settings['default_output_format'])
         lang_str_to_save = 'all' if extract_all_languages_flag or not user_selected_languages else ','.join(sorted(list(user_selected_languages)))
         self.config.set('Extraction', 'selected_languages', lang_str_to_save)
