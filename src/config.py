@@ -53,7 +53,6 @@ class AppConfig:
             'ffmpeg_extract_timeout': DEFAULT_FFMPEG_EXTRACT_TIMEOUT,
             'ffmpeg_ocr_timeout': DEFAULT_FFMPEG_OCR_TIMEOUT,
             'default_output_format': 'srt', 'selected_languages': 'all',
-            'skip_if_exists': False,
             'ocr_enabled': False, 'ocr_command_template': '', 'ocr_temp_dir': '',
             'ocr_default_lang': 'eng',
             'ocr_input_ext_map': {
@@ -86,7 +85,6 @@ class AppConfig:
         self.settings['ffmpeg_ocr_timeout'] = get_cfg('Timeouts', 'ffmpeg_ocr_timeout', self.settings['ffmpeg_ocr_timeout'], type_func=int)
         self.settings['default_output_format'] = get_cfg('Extraction', 'default_output_format', self.settings['default_output_format'])
         self.settings['selected_languages'] = get_cfg('Extraction', 'selected_languages', self.settings['selected_languages'])
-        self.settings['skip_if_exists'] = get_cfg('Extraction', 'skip_if_exists', self.settings['skip_if_exists'], type_func=bool)
         self.settings['ocr_enabled'] = get_cfg('OCR', 'ocr_enabled', self.settings['ocr_enabled'], type_func=bool)
         self.settings['ocr_command_template'] = get_cfg('OCR', 'ocr_command_template', self.settings['ocr_command_template'])
         self.settings['ocr_temp_dir'] = get_cfg('OCR', 'ocr_temp_dir', self.settings['ocr_temp_dir'])
@@ -110,7 +108,6 @@ class AppConfig:
         self.config.set('Extraction', 'default_output_format', self.settings['default_output_format'])
         lang_str_to_save = 'all' if extract_all_languages_flag or not user_selected_languages else ','.join(sorted(list(user_selected_languages)))
         self.config.set('Extraction', 'selected_languages', lang_str_to_save)
-        self.config.set('Extraction', 'skip_if_exists', str(self.settings.get('skip_if_exists', False)))
         self.config.set('OCR', 'ocr_enabled', str(self.settings.get('ocr_enabled', False)))
         self.config.set('OCR', 'ocr_command_template', self.settings.get('ocr_command_template', ''))
         self.config.set('OCR', 'ocr_temp_dir', self.settings.get('ocr_temp_dir', ''))
